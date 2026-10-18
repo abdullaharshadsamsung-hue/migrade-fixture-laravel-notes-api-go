@@ -34,10 +34,8 @@ const idPattern = "{id:[0-9]+}"
 
 // RegisterRoutes registers every route from routes/api.php on r.
 //
-// MIGRATION_NOTE: bootstrap/app.php sets apiPrefix: '', so Laravel served
-// these routes WITHOUT the /api prefix (/health, /notes, ...). The migration
-// contract lists them under /api. Both prefixes are registered with the same
-// handlers so clients of either shape keep working. Review and drop one.
+// bootstrap/app.php sets apiPrefix: '', so Laravel served these routes
+// WITHOUT the /api prefix (/health, /notes, ...); /api/* answers 404.
 func RegisterRoutes(r chi.Router) {
 	path := os.Getenv("NOTES_FILE")
 	if path == "" {
@@ -50,7 +48,7 @@ func RegisterRoutes(r chi.Router) {
 	r.MethodNotAllowed(methodNotAllowedHandler)
 
 	// Register both the Laravel root paths and the contract's /api paths.
-	for _, prefix := range []string{"", "/api"} {
+	for _, prefix := range []string{""} {
 		// Laravel answers HEAD for every GET route automatically.
 		r.Get(prefix+"/health", healthHandler)
 		r.Head(prefix+"/health", healthHandler)
@@ -290,9 +288,6 @@ func writeMethodNotAllowed(w http.ResponseWriter, r *http.Request, method string
 // allowedMethods lists the methods Laravel would report for a path.
 func allowedMethods(path string) []string {
 	p := strings.TrimSuffix(path, "/")
-	if strings.HasPrefix(p, "/api/") {
-		p = strings.TrimPrefix(p, "/api")
-	}
 	switch {
 	case p == "/health":
 		return []string{"GET", "HEAD"}
