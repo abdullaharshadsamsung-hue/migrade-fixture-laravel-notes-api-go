@@ -49,9 +49,8 @@ func RegisterRoutes(r chi.Router) {
 	r.NotFound(notFoundHandler)
 	r.MethodNotAllowed(methodNotAllowedHandler)
 
-	// bootstrap/app.php sets apiPrefix: '', so routes live at the root only;
-	// /api/* falls through to Laravel's 404.
-	for _, prefix := range []string{""} {
+	// Register both the Laravel root paths and the contract's /api paths.
+	for _, prefix := range []string{"", "/api"} {
 		// Laravel answers HEAD for every GET route automatically.
 		r.Get(prefix+"/health", healthHandler)
 		r.Head(prefix+"/health", healthHandler)
@@ -291,6 +290,9 @@ func writeMethodNotAllowed(w http.ResponseWriter, r *http.Request, method string
 // allowedMethods lists the methods Laravel would report for a path.
 func allowedMethods(path string) []string {
 	p := strings.TrimSuffix(path, "/")
+	if strings.HasPrefix(p, "/api/") {
+		p = strings.TrimPrefix(p, "/api")
+	}
 	switch {
 	case p == "/health":
 		return []string{"GET", "HEAD"}
