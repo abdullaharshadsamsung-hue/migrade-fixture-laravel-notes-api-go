@@ -20,7 +20,6 @@ import (
 	"sync"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/rs/zerolog/log"
 )
 
 // DefaultNotesFile is where Laravel's local disk ("storage/app/private")
@@ -412,7 +411,7 @@ func phpString(v any) string {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	payload, err := json.Marshal(v)
 	if err != nil {
-		log.Error().Err(err).Msg("encode JSON response")
+		slog.Error("encode JSON response", "err", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"message":"Server Error"}`))
@@ -424,7 +423,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func serverError(w http.ResponseWriter, err error) {
-	log.Error().Err(err).Msg("notes request failed")
+	slog.Error("notes request failed", "err", err)
 	writeJSON(w, http.StatusInternalServerError, map[string]string{"message": "Server Error"})
 }
 
@@ -508,7 +507,7 @@ func (s *FileStore) load() (notesDoc, error) {
 		for k, n := range obj {
 			id, err := strconv.ParseInt(k, 10, 64)
 			if err != nil {
-				log.Warn().Str("key", k).Msg("skipping note with non-numeric key")
+				slog.Warn("skipping note with non-numeric key", "key", k)
 				continue
 			}
 			doc.notes[id] = n
