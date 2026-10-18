@@ -49,7 +49,9 @@ func RegisterRoutes(r chi.Router) {
 	r.NotFound(notFoundHandler)
 	r.MethodNotAllowed(methodNotAllowedHandler)
 
-	for _, prefix := range []string{"", "/api"} {
+	// bootstrap/app.php sets apiPrefix: '', so routes live at the root only;
+	// /api/* falls through to Laravel's 404.
+	for _, prefix := range []string{""} {
 		// Laravel answers HEAD for every GET route automatically.
 		r.Get(prefix+"/health", healthHandler)
 		r.Head(prefix+"/health", healthHandler)
@@ -230,10 +232,44 @@ func noteNotFound(w http.ResponseWriter) {
 // MIGRATION_NOTE: Laravel renders HTML error pages for non-JSON clients;
 // this port always answers JSON.
 func notFoundHandler(w http.ResponseWriter, r *http.Request) {
+	if !expectsJSON(r) {
+		w.Header().Set("Content-Type", "text/html; charset=UTF-8")
+		w.WriteHeader(http.StatusNotFound)
+		if r.Method != http.MethodHead {
+			_, _ = w.Write([]byte(notFoundHTML))
+		}
+		return
+	}
 	writeJSON(w, http.StatusNotFound, map[string]string{
 		"message": fmt.Sprintf("The route %s could not be found.", laravelPath(r.URL.Path)),
 	})
 }
+
+// expectsJSON mirrors Laravel's Request::expectsJson().
+func expectsJSON(r *http.Request) bool {
+	accept := r.Header.Get("Accept")
+	ajax := r.Header.Get("X-Requested-With") == "XMLHttpRequest"
+	pjax := r.Header.Get("X-PJAX") == "true"
+	if ajax && !pjax && (accept == "" || strings.Contains(accept, "*")) {
+		return true
+	}
+	first := strings.TrimSpace(strings.Split(accept, ",")[0])
+	return strings.Contains(first, "/json") || strings.Contains(first, "+json")
+}
+
+const notFoundHTML = `<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+
+        <title>Not Found</title>
+    </head>
+    <body class="antialiased">
+        <div>404 | Not Found</div>
+    </body>
+</html>
+`
 
 func methodNotAllowedHandler(w http.ResponseWriter, r *http.Request) {
 	writeMethodNotAllowed(w, r, r.Method)
@@ -255,9 +291,6 @@ func writeMethodNotAllowed(w http.ResponseWriter, r *http.Request, method string
 // allowedMethods lists the methods Laravel would report for a path.
 func allowedMethods(path string) []string {
 	p := strings.TrimSuffix(path, "/")
-	if strings.HasPrefix(p, "/api/") {
-		p = strings.TrimPrefix(p, "/api")
-	}
 	switch {
 	case p == "/health":
 		return []string{"GET", "HEAD"}
