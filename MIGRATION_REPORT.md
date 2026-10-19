@@ -1,8 +1,8 @@
 ## Migration Report
 
-**Recommendation:** READY TO MERGE (based on behavioral comparison against the original application)
+**Recommendation:** SIGNIFICANT REVIEW REQUIRED (based on behavioral comparison against the original application)
 **Build:** passed
-**Behavior vs original:** 6/6 comparisons match (1 inconclusive)
+**Behavior vs original:** 8/8 comparisons match
 **Target unit tests:** 44/46 passing
 **Source test baseline:** 2/2 passing
 **Ported test files collected by the runner:** 3/3
@@ -10,7 +10,7 @@
 **Model self-assessed confidence:** 95%
 
 ### Summary
-3 of 3 modules translated. Build: passed. Target unit tests: 44/46 passing. Source test baseline: 2/2 passing. Behavior vs original: 6/6 comparisons match, 1 inconclusive. 1 modules are below confidence threshold and need review. Model self-assessed confidence: 95%.
+3 of 3 modules translated. Build: passed. Target unit tests: 44/46 passing. Source test baseline: 2/2 passing. Behavior vs original: 8/8 comparisons match. Master review: 1 critical finding(s). 1 modules are below confidence threshold and need review. Model self-assessed confidence: 95%.
 
 ### Automated fixes applied
 - `internal/httpapi/router.go` (+1/-0): server boot repair
@@ -20,13 +20,16 @@
 - `internal/httpapi/router.go` (+3/-8): endpoint behaviour
 
 ### Agent notes (unverified)
-Migrated the Laravel notes API (3 modules: routes, NoteController, NoteRepository) to standard-library Go. Compile is clean, the server boots and all critical contract checks pass, but 2 of 46 router tests fail (TestHealth returns 404, and TestIndexAndShow). The router keeps flipping between two versions: each contract-test fix round breaks those tests, and each test fix gets undone by the next contract round. internal/httpapi/router.go needs someone to look at it by hand before merge.
+Contract tests re-run on request.
 
+
+### ⚠️ Critical findings from automated review
+- **[structural-omission]** internal/httpapi/handlers.go and internal/httpapi/router.go are both in `package httpapi`, have no build tags, and each declares the same top-level identifiers: DefaultNotesFile, Note, FileStore, NewFileStore, RegisterRoutes, parseID, writeJSON, serverError, along with the FileStore methods load/save/All/Find/Create/Update/Delete. Go will not compile a package with duplicate declarations, so the package and the server do not build. The two files are separate, conflicting migrations of NoteController and NoteRepository. They differ in behaviour: handlers.go adds PATCH, which the source never had; its Store returns 500 on array bodies, while router.go returns "Array"; their trim character sets differ; and their 404 bodies for overflowing ids differ. Keep one implementation and delete the other.
 
 ### Other review findings
-- [warning] **structural-omission**: internal/note/filestore.go is a second, standalone NoteRepository port (package note, Store interface, Patch with json.RawMessage) that nothing uses. No caller of note.NewFileStore exists, and cmd/server/router.go only mounts httpapi.RegisterRoutes, which uses its own FileStore in router.go. The two implementations already behave differently: Title is string in one and any in the other; one fails on non-numeric keys and the other skips them with a warning; the constructor takes a directory in one and a file path in the other. Keeping both invites drift and confusion about which is canonical. Either wire internal/note into httpapi or delete it.
-- [warning] **logic-bug**: store() in the source does (string)$request->input('body',''). If body is an array or object, PHP raises an 'Array to string conversion' warning, which Laravel's HandleExceptions turns into an ErrorException, so the request gets a 500. The surviving router.go phpString() silently returns the string "Array" for map/[]any, so POST /notes with an object or array body now returns 201 and stores the note with body "Array". The removed handlers.go version (phpStringCast with errArrayToString) handled this correctly, and that behaviour was lost when the duplicate was collapsed into router.go. Float formatting also drifts: strconv 'G',-1 gives "1E+25" and "1E-05", where PHP gives "1.0E+25" and "1.0E-5".
-- [info] **requirement-drift**: normalizeInput, the TrimStrings emulation in router.go, trims PHP trim()'s default set (" \t\n\r\x00\x0B"). Laravel's TrimStrings middleware uses a regex on \s plus U+FEFF, U+200B and U+200E. So a title made only of a BOM or zero-width space is accepted here, where Laravel would reject it with 400. A NUL byte is also trimmed here but not by Laravel. The deleted handlers.go isTrimRune had the Laravel-accurate set.
-- [info] **inconsistent-pattern**: The fix loops switched the /api prefix on, off, on, then off again: one 'target test failures' fix added /api to make tests pass, and the next 'endpoint behaviour' fix removed it. The final state (root-only) matches Laravel's apiPrefix ''. Any tests that call /api/* will now fail, though, and the comments are stale. The loop comment still says 'Register both the Laravel root paths and the contract's /api paths', and the MIGRATION_NOTE on notFoundHandler says 'this port always answers JSON' even though it now serves HTML to clients that don't expect JSON. Check the test suite and the API contract against the root-only routing.
+- [warning] **inconsistent-pattern**: internal/note/filestore.go is a third, separate port of NoteRepository. Its types are note.Store and note.Patch, and Body is json.RawMessage. Nothing imports it: a search for "internal/note" finds no matches. Both httpapi files define their own FileStore instead. Its constructor also has a different contract: NewFileStore takes a directory and appends notes.json, while the httpapi versions take a full file path from NOTES_FILE. It also orders All() by id, the same as router.go, while handlers.go uses insertion order. The repository layer was never wired to the controller layer, so this is dead, conflicting code.
+- [warning] **requirement-drift**: The automated fix loops in router.go went back and forth on the /api prefix. The 'target test failures' fix added the "/api" prefix and the /api stripping in allowedMethods so the target tests would pass. A later 'endpoint behaviour' fix took both out again. The final code serves root paths only, so any target tests or contract clients that expect /api/notes and /api/health will now get 404. The comment inside the loop still says "Register both the Laravel root paths and the contract's /api paths", which contradicts the code. Decide which path shape the contract requires and update the tests or routes to match.
+- [info] **logic-bug**: In router.go, a fix loop made notFoundHandler return HTML to clients that don't ask for JSON. The MIGRATION_NOTE above it still says "this port always answers JSON", which is now wrong. The 405 path (writeMethodNotAllowed) also still always answers JSON, so the two error paths handle content negotiation differently.
+- [info] **logic-bug**: phpString in router.go formats floats with strconv.FormatFloat(f, 'G', -1, 64). This does not match PHP's (string) cast for exponent values: 1e20 becomes "1E+20" where PHP gives "1.0E+20", and the precision rules differ too. handlers.go's phpFloatString handles these cases. A note body sent as such a number would be stored differently from the source.
 ---
 *Generated by Migrator (agentic orchestrator)*
